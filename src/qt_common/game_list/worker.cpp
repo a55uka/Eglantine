@@ -200,6 +200,36 @@ QString LooseExeFSName(const std::string& physical_name) {
     return QObject::tr("%1 (update)").arg(name);
 }
 
+// A loose dump's game list entry is its small main executable, so the size column would only
+// show a few dozen MB. Sum the dump's real contents instead: the ExeFS directory plus the
+// RomFS directory next to it, matching the loader's loose RomFS discovery.
+u64 LooseDumpSize(const std::filesystem::path& main_path) {
+    const auto exefs_dir = main_path.parent_path();
+
+    u64 total{};
+    std::error_code ec;
+    const auto accumulate = [&total, &ec](const std::filesystem::path& dir) {
+        for (std::filesystem::recursive_directory_iterator it{
+                 dir, std::filesystem::directory_options::skip_permission_denied, ec};
+             !ec && it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
+            std::error_code entry_ec;
+            if (it->is_regular_file(entry_ec)) {
+                const auto size = it->file_size(entry_ec);
+                if (!entry_ec) {
+                    total += size;
+                }
+            }
+        }
+    };
+
+    accumulate(exefs_dir);
+    const auto romfs_dir = exefs_dir.parent_path() / "romfs";
+    if (std::filesystem::is_directory(romfs_dir, ec)) {
+        accumulate(romfs_dir);
+    }
+    return total;
+}
+
 QString FormatPatchNameVersions(const FileSys::PatchManager& patch_manager,
                                 Loader::AppLoader& loader, bool updatable = true) {
     QString out;
@@ -410,7 +440,7 @@ void GameListWorker::ScanFileSystem(ScanTarget target, const std::string& dir_pa
             std::vector<u64> program_ids;
             loader->ReadProgramIds(program_ids);
 
-            const auto addEntry = [this, physical_name,
+            const auto addEntry = [this, &path, physical_name,
                                    parent_dir](std::unique_ptr<Loader::AppLoader>& app_loader,
                                                const u64 id) {
                 std::vector<u8> icon;
@@ -428,9 +458,12 @@ void GameListWorker::ScanFileSystem(ScanTarget target, const std::string& dir_pa
                 const FileSys::PatchManager patch{id, system.GetFileSystemController(),
                                                   system.GetContentProvider()};
 
-                auto entry = MakeGameListEntry(
-                    physical_name, name, Common::FS::GetSize(physical_name), icon, *app_loader,
-                    id, play_time_manager, patch);
+                const u64 size = IsExtractedNCAMain(physical_name)
+                                     ? LooseDumpSize(path)
+                                     : Common::FS::GetSize(physical_name);
+
+                auto entry = MakeGameListEntry(physical_name, name, size, icon, *app_loader, id,
+                                               play_time_manager, patch);
 
                 RecordEvent([=](GameListModel* model) { model->AddEntry(entry, parent_dir); });
             };
