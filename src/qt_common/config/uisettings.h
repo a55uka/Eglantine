@@ -214,7 +214,6 @@ struct Values {
 
     std::atomic_bool is_game_list_reload_pending{false};
     Setting<bool> cache_game_list{linkage, true, "cache_game_list", Category::UiGameList};
-    Setting<bool> fetch_game_metadata{linkage, true, "fetch_game_metadata", Category::UiGameList};
     Setting<bool> favorites_expanded{linkage, true, "favorites_expanded", Category::UiGameList};
     QVector<u64> favorited_ids;
     QMap<u64, QDir> ryujinx_link_paths;

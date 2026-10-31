@@ -234,16 +234,6 @@
             </property>
            </widget>
           </item>
-          <item>
-           <widget class="QCheckBox" name="fetch_game_metadata">
-            <property name="toolTip">
-             <string>Look up names and icons for dumps without control data from a community title database</string>
-            </property>
-            <property name="text">
-             <string>Fetch Missing Game Metadata Online</string>
-            </property>
-           </widget>
-          </item>
          </layout>
         </item>
        </layout>
