@@ -171,36 +171,48 @@ QString FormatGameName(const std::string& physical_name) {
     return physical_name_as_qstring;
 }
 
-// Loose ExeFS dumps (<game>/exefs/main, updates in <game>/updates[/]/exefs/main) have no control
-// data, so they are named after their game folder.
+// Loose ExeFS dumps (<game>/exefs/main, <game>/base/exefs/main, updates in
+// <game>/updates/<title id>/exefs/main) have no control data, so they are named after their
+// game folder.
 QString LooseExeFSName(const std::string& physical_name) {
     QDir dir = QFileInfo(QString::fromStdString(physical_name)).dir();
     if (dir.dirName().compare(QStringLiteral("exefs"), Qt::CaseInsensitive) != 0 || !dir.cdUp()) {
         return {};
     }
 
-    const auto is_updates_dir = [&dir] {
-        return dir.dirName().compare(QStringLiteral("updates"), Qt::CaseInsensitive) == 0;
+    // Storage levels sit between the game folder and its content directories.
+    const auto is_storage_level = [](const QString& name) {
+        if (name.compare(QStringLiteral("base"), Qt::CaseInsensitive) == 0 ||
+            name.compare(QStringLiteral("update"), Qt::CaseInsensitive) == 0 ||
+            name.compare(QStringLiteral("updates"), Qt::CaseInsensitive) == 0) {
+            return true;
+        }
+        return !name.isEmpty() &&
+               std::all_of(name.cbegin(), name.cend(), [](QChar c) {
+                   return c.isDigit() || (c >= QLatin1Char('a') && c <= QLatin1Char('f')) ||
+                          (c >= QLatin1Char('A') && c <= QLatin1Char('F'));
+               });
     };
 
-    // An update may sit in a title-ID-named folder: <game>/updates/<title id>/exefs.
-    if (!is_updates_dir()) {
-        const QString tid = dir.dirName();
-        if (!std::all_of(tid.cbegin(), tid.cend(), [](QChar c) { return c.isDigit(); }) ||
-            !dir.cdUp() || !is_updates_dir()) {
-            return tid;
+    bool is_update = false;
+    while (is_storage_level(dir.dirName())) {
+        if (dir.dirName().compare(QStringLiteral("update"), Qt::CaseInsensitive) == 0 ||
+            dir.dirName().compare(QStringLiteral("updates"), Qt::CaseInsensitive) == 0) {
+            is_update = true;
+        }
+        if (!dir.cdUp()) {
+            return {};
         }
     }
 
-    if (!dir.cdUp()) {
+    const QString name = dir.dirName();
+    if (name.isEmpty()) {
         return {};
     }
-
-    const QString name = dir.dirName();
-    if (name.contains(QStringLiteral("update"), Qt::CaseInsensitive)) {
-        return name;
+    if (is_update && !name.contains(QStringLiteral("update"), Qt::CaseInsensitive)) {
+        return QObject::tr("%1 (update)").arg(name);
     }
-    return QObject::tr("%1 (update)").arg(name);
+    return name;
 }
 
 // A loose dump's game list entry is its small main executable, so the size column would only
@@ -556,25 +568,28 @@ void GameListWorker::ScanFileSystem(ScanTarget target, const std::string& dir_pa
             watch_list.append(QString::fromStdString(Common::FS::PathToUTF8String(path)));
 
             // Shallow scans stop at the first level, so probe the standard layouts of loose
-            // ExeFS dumps: <game>/exefs/main and <game>/updates/<title id>/exefs/main.
+            // ExeFS dumps: <game>/exefs/main, <game>/base/exefs/main and their updates in
+            // <root>/updates/<title id>/exefs/main.
             if (!deep_scan && target == ScanTarget::PopulateGameList) {
-                const auto exefs_main = path / "exefs" / "main";
-                if (Common::FS::IsFile(exefs_main)) {
-                    process_candidate(exefs_main);
-                }
+                for (const auto& content_root : {path, path / "base"}) {
+                    const auto exefs_main = content_root / "exefs" / "main";
+                    if (Common::FS::IsFile(exefs_main)) {
+                        process_candidate(exefs_main);
+                    }
 
-                const auto updates = path / "updates";
-                if (Common::FS::IsDir(updates)) {
-                    Common::FS::IterateDirEntries(
-                        updates,
-                        [&process_candidate](const std::filesystem::path& entry) {
-                            const auto update_main = entry / "exefs" / "main";
-                            if (Common::FS::IsFile(update_main)) {
-                                process_candidate(update_main);
-                            }
-                            return true;
-                        },
-                        Common::FS::DirEntryFilter::Directory);
+                    const auto updates = content_root / "updates";
+                    if (Common::FS::IsDir(updates)) {
+                        Common::FS::IterateDirEntries(
+                            updates,
+                            [&process_candidate](const std::filesystem::path& entry) {
+                                const auto update_main = entry / "exefs" / "main";
+                                if (Common::FS::IsFile(update_main)) {
+                                    process_candidate(update_main);
+                                }
+                                return true;
+                            },
+                            Common::FS::DirEntryFilter::Directory);
+                    }
                 }
             }
 
