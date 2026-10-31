@@ -26,7 +26,9 @@ constexpr auto DbUrlPath = "/blawar/titledb/master/US.en.json";
 constexpr auto DbRefreshInterval = std::chrono::hours{24 * 30};
 
 std::filesystem::path DatabasePath() {
-    return Common::FS::GetEdenPath(Common::FS::EdenPath::CacheDir) / "game_list" / "title_db.tsv";
+    // Outside the game_list cache directory so resetting the metadata cache keeps the
+    // downloaded database around.
+    return Common::FS::GetEdenPath(Common::FS::EdenPath::CacheDir) / "title_db.tsv";
 }
 
 std::string Sanitize(std::string value) {
