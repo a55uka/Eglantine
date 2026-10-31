@@ -73,6 +73,7 @@ void ConfigureFilesystem::SetConfiguration() {
     ui->dump_nso->setChecked(Settings::values.dump_nso.GetValue());
 
     ui->cache_game_list->setChecked(UISettings::values.cache_game_list.GetValue());
+    ui->fetch_game_metadata->setChecked(UISettings::values.fetch_game_metadata.GetValue());
 
     UpdateEnabledControls();
 }
@@ -95,6 +96,7 @@ void ConfigureFilesystem::ApplyConfiguration() {
     Settings::values.dump_nso = ui->dump_nso->isChecked();
 
     UISettings::values.cache_game_list = ui->cache_game_list->isChecked();
+    UISettings::values.fetch_game_metadata = ui->fetch_game_metadata->isChecked();
 }
 
 void ConfigureFilesystem::SetDirectory(DirectoryTarget target, QLineEdit* edit) {

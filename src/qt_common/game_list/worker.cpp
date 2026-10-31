@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <utility>
@@ -34,6 +36,7 @@
 #include "qt_common/qt_common.h"
 
 #include "qt_common/game_list/game_list_p.h"
+#include "qt_common/game_list/metadata.h"
 
 #include "qt_common/game_list/model.h"
 #include "qt_common/game_list/worker.h"
@@ -228,6 +231,42 @@ u64 LooseDumpSize(const std::filesystem::path& main_path) {
         accumulate(romfs_dir);
     }
     return total;
+}
+
+// Online metadata for a loose dump, shared with the control-NCA path's cache files. Only
+// successful lookups are written, so transient network failures retry on the next scan.
+std::pair<std::vector<u8>, std::string> FetchOnlineMetadata(u64 id) {
+    const auto cache_dir = Common::FS::GetEdenPath(Common::FS::EdenPath::CacheDir) / "game_list";
+    const auto icon_path = cache_dir / fmt::format("{:016X}.jpeg", id);
+    const auto name_path = cache_dir / fmt::format("{:016X}.appname.txt", id);
+
+    std::error_code ec;
+    if (std::filesystem::exists(icon_path, ec) && std::filesystem::exists(name_path, ec)) {
+        std::ifstream icon_file{icon_path, std::ios::binary};
+        const std::vector<u8> icon{std::istreambuf_iterator<char>{icon_file},
+                                   std::istreambuf_iterator<char>{}};
+        std::ifstream name_file{name_path, std::ios::binary};
+        const std::string name{std::istreambuf_iterator<char>{name_file},
+                               std::istreambuf_iterator<char>{}};
+        if (!icon.empty()) {
+            return {std::move(icon), std::move(name)};
+        }
+    }
+
+    const auto info = QtCommon::GameMetadata::Lookup(id);
+    if (!info) {
+        return {};
+    }
+    const auto name = info->name;
+    auto icon = QtCommon::GameMetadata::FetchIcon(info->icon_url);
+    if (icon.empty()) {
+        return {{}, name};
+    }
+
+    std::ofstream{icon_path, std::ios::binary | std::ios::trunc}
+            .write(reinterpret_cast<const char*>(icon.data()), static_cast<std::streamsize>(icon.size()));
+    std::ofstream{name_path, std::ios::binary | std::ios::trunc} << name;
+    return {std::move(icon), name};
 }
 
 QString FormatPatchNameVersions(const FileSys::PatchManager& patch_manager,
@@ -448,8 +487,24 @@ void GameListWorker::ScanFileSystem(ScanTarget target, const std::string& dir_pa
 
                 std::string name = " ";
                 const auto res3 = app_loader->ReadTitle(name);
-                if ((res3 != Loader::ResultStatus::Success || name.empty() || name == " ") &&
-                    IsExtractedNCAMain(physical_name)) {
+                const bool title_missing =
+                    res3 != Loader::ResultStatus::Success || name.empty() || name == " ";
+
+                // Loose dumps carry no control data of their own; fill any gaps from the
+                // community title database before falling back to the folder name.
+                if (IsExtractedNCAMain(physical_name) &&
+                    UISettings::values.fetch_game_metadata.GetValue() &&
+                    (title_missing || icon.empty())) {
+                    const auto [online_icon, online_name] = FetchOnlineMetadata(id);
+                    if (icon.empty()) {
+                        icon = online_icon;
+                    }
+                    if (title_missing && !online_name.empty()) {
+                        name = online_name;
+                    }
+                }
+
+                if (title_missing && name == " " && IsExtractedNCAMain(physical_name)) {
                     if (const QString loose = LooseExeFSName(physical_name); !loose.isEmpty()) {
                         name = loose.toStdString();
                     }

@@ -33,6 +33,7 @@ add_library(qt_common STATIC
 
     game_list/model.h game_list/model.cpp
     game_list/worker.h game_list/worker.cpp
+    game_list/metadata.h game_list/metadata.cpp
     game_list/game_list_p.h
 
     qt_string_lookup.h
